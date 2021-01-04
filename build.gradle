@@ -1,0 +1,72 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.bmuschko.docker-java-application' version '4.10.0'
+}
+
+repositories {
+    jcenter()
+    maven {
+        url 'http://packages.confluent.io/maven/'
+    }
+}
+
+ext {
+    javaMainClass = "kafka.streams.scaling.App"
+}
+
+
+application {
+    mainClassName = javaMainClass
+}
+
+
+dependencies {
+    implementation 'org.junit.jupiter:junit-jupiter:5.4.2'
+    compile 'org.apache.kafka:kafka-streams:2.5.1'
+    compile 'org.slf4j:slf4j-log4j12:1.7.25'
+    compile group: 'com.google.code.gson', name: 'gson', version: '2.7'
+    compileOnly 'org.projectlombok:lombok:1.18.16'
+    annotationProcessor 'org.projectlombok:lombok:1.18.16'
+
+    testCompileOnly 'org.projectlombok:lombok:1.18.16'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.16'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.3.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.3.1'
+}
+
+mainClassName = 'kafka.streams.scaling.Sender'
+
+task fatJar(type: Jar) {
+    manifest {
+        attributes 'Main-Class': 'kafka.streams.scaling.App'
+    }
+    baseName = project.name + '-all'
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+}
+
+docker {
+    javaApplication {
+        if (System.getenv('GOOGLE_APPLICATION_CREDENTIALS')) {
+            registryCredentials {
+                username = 'croken98'
+                password = '10041998qV'
+                email = 'crocens98@gmail.com'
+            }
+        }
+        baseImage = 'openjdk:11-jdk'
+        maintainer = 'Viktar Zinkou "crocens98@gmail.com"'
+        tag = 'croken98/kafka-sender' + ':latest'
+        jvmArgs = [ "-Dcom.sun.management.jmxremote.port=5555",
+                    "-Dcom.sun.management.jmxremote.authenticate=false",
+                    "-Dcom.sun.management.jmxremote.ssl=false"]
+    }
+}
+
+
+test {
+    useJUnitPlatform()
+}
