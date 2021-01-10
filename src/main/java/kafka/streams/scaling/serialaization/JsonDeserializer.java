@@ -6,14 +6,20 @@ import java.util.Map;
 import kafka.streams.scaling.util.JsonConverter;
 import org.apache.kafka.common.serialization.Deserializer;
 
+
+/**
+ * @param <T> Entity which will be deserialized from json
+ */
 public class JsonDeserializer<T> implements Deserializer<T> {
 
   private Class<?> type;
   private final JsonConverter jsonConverter;
 
-  /*
+  /**
    * Default constructor needed by kafka
+   * @param jsonConverter instance of JsonConverter uses to parse json
    */
+
   public JsonDeserializer(JsonConverter jsonConverter) {
     this.jsonConverter = jsonConverter;
   }

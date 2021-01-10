@@ -33,10 +33,23 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.16'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.3.1'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.3.1'
+
+
+    testImplementation "org.apache.kafka:kafka-streams-test-utils:2.5.1"
+    testImplementation "junit:junit:4.13.1"
+    testImplementation 'org.hamcrest:hamcrest:2.2'
+
+    testCompileOnly "org.projectlombok:lombok:1.18.16"
+    testAnnotationProcessor "org.projectlombok:lombok:1.18.12"
 }
 
-mainClassName = 'kafka.streams.scaling.Sender'
-
+test {
+    testLogging {
+        outputs.upToDateWhen { false }
+        showStandardStreams = true
+        exceptionFormat = "full"
+    }
+}
 task fatJar(type: Jar) {
     manifest {
         attributes 'Main-Class': 'kafka.streams.scaling.App'
@@ -50,19 +63,12 @@ task fatJar(type: Jar) {
 
 docker {
     javaApplication {
-        if (System.getenv('GOOGLE_APPLICATION_CREDENTIALS')) {
-            registryCredentials {
-                username = 'croken98'
-                password = '10041998qV'
-                email = 'crocens98@gmail.com'
-            }
-        }
         baseImage = 'openjdk:11-jdk'
         maintainer = 'Viktar Zinkou "crocens98@gmail.com"'
-        tag = 'croken98/kafka-sender' + ':latest'
-        jvmArgs = [ "-Dcom.sun.management.jmxremote.port=5555",
-                    "-Dcom.sun.management.jmxremote.authenticate=false",
-                    "-Dcom.sun.management.jmxremote.ssl=false"]
+        tag = 'croken98/kafka-streams-weather-app' + ':latest'
+        jvmArgs = ["-Dcom.sun.management.jmxremote.port=5555",
+                   "-Dcom.sun.management.jmxremote.authenticate=false",
+                   "-Dcom.sun.management.jmxremote.ssl=false"]
     }
 }
 

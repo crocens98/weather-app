@@ -1,9 +1,9 @@
 package kafka.streams.scaling;
 
-import com.google.gson.FieldNamingPolicy;
-import java.time.Duration;
-import java.util.Optional;
+import java.util.Comparator;
 import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
 import kafka.streams.scaling.entity.Hotel;
 import kafka.streams.scaling.entity.TemperatureRecord;
 import kafka.streams.scaling.entity.Weather;
@@ -11,16 +11,14 @@ import kafka.streams.scaling.entity.WeatherGroupingKey;
 import kafka.streams.scaling.entity.aggregator.CountAndSum;
 import kafka.streams.scaling.entity.aggregator.TemperatureRecordAgrigator;
 import kafka.streams.scaling.joiner.TemperatureRecordsHotelJoiner;
-import kafka.streams.scaling.serialaization.JsonDeserializer;
-import kafka.streams.scaling.serialaization.JsonSerializer;
-import kafka.streams.scaling.util.JsonConverter;
+import kafka.streams.scaling.serialaization.utill.SerdesUtill;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.Joined;
@@ -28,51 +26,29 @@ import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.streams.kstream.Suppressed;
 import org.apache.log4j.Logger;
 
 public class App {
 
   private static final Logger log = Logger.getLogger(App.class);
 
-  private static final String hotelsTopic = "test";
-  private static final String weatherTopic = "weather_data";
+  public static final String HOTELS_TOPIC = System.getProperty("hotels_data", "hotels_data");
+  public static final String WEATHER_TOPIC = System.getProperty("weather_data", "weather_data");
+  public static final String APP_ID = System.getProperty("weather-app", "weather-app-v10");
+  public static final String RESULT_TOPIC = System.getProperty("result-topic", "result-topic");
+  public static final String BOOTSTRAP_SERVER = System
+      .getProperty("BOOTSTRAP_SERVERS_CONFIG", "localhost:9092");
 
   private static final TemperatureRecordsHotelJoiner joiner = new TemperatureRecordsHotelJoiner();
 
-  private static Serde<TemperatureRecord> temperatureRecordSerde;
-  private static Serde<Hotel> hotelSerde;
-  private static Serde<Weather> weatherSerde;
-  private static Serde<WeatherGroupingKey> weatherGroupingKeySerde;
-  private static Serde<CountAndSum> countAndSumSerde;
-  private static Serde<TemperatureRecordAgrigator> temperatureRecordsSerde;
-
-  private static final JsonConverter hotelJsonConverter = new JsonConverter(
-      FieldNamingPolicy.UPPER_CAMEL_CASE);
-  private static final JsonConverter weatherJsonConverter = new JsonConverter(
-      FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES);
+  private static long counter1;
+  private static long counter2;
 
   public static void main(String[] args) {
-
-    initSerde();
-
-    StreamsBuilder builder = new StreamsBuilder();
-    KStream<String, Hotel> hotelsStream = builder
-        .stream(hotelsTopic, Consumed.with(Serdes.String(), hotelSerde));
-    KStream<String, Weather> weatherStream = builder.stream(weatherTopic,
-        Consumed.with(Serdes.String(), weatherSerde));
-
-    KTable<String, TemperatureRecordAgrigator> temperatureRecordsTable = buildTemperatureRecordsTable(
-        weatherStream);
-    KStream<String, Hotel> hotelsTStream = buildHotelsTable(hotelsStream);
-
-    hotelsTStream.leftJoin(temperatureRecordsTable, joiner, Joined.with(Serdes.String(), hotelSerde, temperatureRecordsSerde ))
-        .to("result-topic", Produced.with(Serdes.String(), hotelSerde));
-
-    KafkaStreams streams = new KafkaStreams(builder.build(), provideProperties());
+    Topology topology = buildTopology();
+    KafkaStreams streams = new KafkaStreams(topology, provideProperties());
     streams.cleanUp();
     streams.start();
-
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
       try {
         streams.close();
@@ -83,7 +59,40 @@ public class App {
     }));
   }
 
+  private static Properties provideProperties() {
+    Properties config = new Properties();
+    config.put(StreamsConfig.APPLICATION_ID_CONFIG,
+        APP_ID);
+    config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
+    config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    config.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, 1000 * 60);
+    config.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
+    config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
+    return config;
+  }
+
+  public static Topology buildTopology() {
+    StreamsBuilder builder = new StreamsBuilder();
+    KStream<String, Hotel> hotelsStream = builder
+        .stream(HOTELS_TOPIC, Consumed.with(Serdes.String(), SerdesUtill.hotelSerde));
+    KStream<String, Weather> weatherStream = builder.stream(WEATHER_TOPIC,
+        Consumed.with(Serdes.String(), SerdesUtill.weatherSerde));
+
+    KTable<String, TemperatureRecordAgrigator> temperatureRecordsTable = buildTemperatureRecordsTable(
+        weatherStream);
+    KStream<String, Hotel> hotelsTStream = buildHotelsTable(hotelsStream);
+
+    hotelsTStream.leftJoin(temperatureRecordsTable, joiner,
+        Joined.with(Serdes.String(), SerdesUtill.hotelSerde, SerdesUtill.temperatureRecordsSerde))
+        .to(RESULT_TOPIC, Produced.with(Serdes.String(), SerdesUtill.hotelSerde));
+    return builder.build();
+  }
+
   private static CountAndSum countAndSumAggregation(CountAndSum aggregate, Weather value) {
+    if (counter1 % 1_000_000 == 0) {
+      log.info("SUM AGGREGATION " + counter1);
+    }
+    counter1++;
     aggregate.setCount(aggregate.getCount() + 1);
     aggregate.setSum(aggregate.getSum() + value.getAvgTmprC());
     return aggregate;
@@ -91,10 +100,12 @@ public class App {
 
   private static KeyValue<String, TemperatureRecord> initKeyValueRecord(WeatherGroupingKey key,
       Double value) {
-    TemperatureRecord temperatureRecord = new TemperatureRecord();
-    temperatureRecord.setDay(key.getWthrDate());
-    temperatureRecord.setTemperature(value);
-    temperatureRecord.setGeohash(key.getGeohash());
+    TemperatureRecord temperatureRecord = TemperatureRecord
+        .builder()
+        .day(key.getWthrDate())
+        .temperature(value)
+        .geohash(key.getGeohash())
+        .build();
     return KeyValue.pair(key.getGeohash(), temperatureRecord);
   }
 
@@ -102,85 +113,42 @@ public class App {
       KStream<String, Weather> weatherStream) {
     return weatherStream.filter((key, value) -> value.getGeohash() != null)
         .selectKey(
-            (k, weather) -> new WeatherGroupingKey(weather.getWthrDate(), weather.getGeohash()))
+            (k, weather) -> WeatherGroupingKey.builder().wthrDate(weather.getWthrDate())
+                .geohash(weather.getGeohash()).build()
+        )
         .groupByKey(
-            Grouped.with(weatherGroupingKeySerde, weatherSerde))
+            Grouped.with(SerdesUtill.weatherGroupingKeySerde, SerdesUtill.weatherSerde))
         .aggregate(() -> new CountAndSum(0L, 0.0),
             (key, value, aggregate) -> countAndSumAggregation(aggregate, value),
-            Materialized.with(weatherGroupingKeySerde, countAndSumSerde)).mapValues(
+            Materialized.with(SerdesUtill.weatherGroupingKeySerde, SerdesUtill.countAndSumSerde))
+        .mapValues(
             value -> value.getSum() / value.getCount(),
-            Materialized.with(weatherGroupingKeySerde, Serdes.Double()))
-        .suppress(Suppressed.untilTimeLimit(Duration.ofSeconds(5), Suppressed.BufferConfig.unbounded()))
+            Materialized.with(SerdesUtill.weatherGroupingKeySerde, Serdes.Double()))
         .toStream()
         .map(App::initKeyValueRecord)
-        .groupByKey(Grouped.with(Serdes.String(), temperatureRecordSerde))
+        .groupByKey(Grouped.with(Serdes.String(), SerdesUtill.temperatureRecordSerde))
         .aggregate(
-            TemperatureRecordAgrigator::new, (key, value, aggregate) -> {
-              aggregate.getTemperatureRecords().add(value);
+            () -> TemperatureRecordAgrigator.builder()
+                .temperatureRecords(new TreeSet<>(Comparator.comparing(TemperatureRecord::getDay)))
+                .build()
+            , (key, value, aggregate) -> {
+              if (counter2 % 1_000_000 == 0) {
+                log.info("TEMPERATURE RECORDS AGGREGATION " + counter2);
+              }
+              counter2++;
+
+              Set<TemperatureRecord> temperatureRecords = new TreeSet<>(
+                  Comparator.comparing(TemperatureRecord::getDay));
+              temperatureRecords.addAll(aggregate.getTemperatureRecords());
+              temperatureRecords.remove(value);
+              temperatureRecords.add(value);
+              aggregate.setTemperatureRecords(temperatureRecords);
               return aggregate;
-            }, Materialized.with(Serdes.String(), temperatureRecordsSerde)).suppress(
-            Suppressed.untilTimeLimit(Duration.ofSeconds(5 * 60 * 10), Suppressed.BufferConfig.unbounded()));
+            }, Materialized.with(Serdes.String(), SerdesUtill.temperatureRecordsSerde));
   }
 
   private static KStream<String, Hotel> buildHotelsTable(KStream<String, Hotel> hotelsStream) {
     return hotelsStream.selectKey((key, hotel) -> hotel.getGeohash());
-  }
-
-  private static void initSerde() {
-    JsonSerializer<Hotel> hotelJsonSerializer = new JsonSerializer<>(hotelJsonConverter);
-    JsonDeserializer<Hotel> hotelJsonDeserializer = new JsonDeserializer<>(Hotel.class,
-        hotelJsonConverter);
-
-    JsonSerializer<Weather> weatherJsonSerializer = new JsonSerializer<>(weatherJsonConverter);
-    JsonDeserializer<Weather> weatherJsonDeserializer = new JsonDeserializer<>(Weather.class,
-        weatherJsonConverter);
-
-    JsonSerializer<WeatherGroupingKey> weatherGroupingKeyJsonSerializer = new JsonSerializer<>(
-        weatherJsonConverter);
-    JsonDeserializer<WeatherGroupingKey> weatherGroupingKeyJsonDeserializer = new JsonDeserializer<>(
-        WeatherGroupingKey.class, weatherJsonConverter);
-
-    JsonSerializer<CountAndSum> countAndSumSerializer = new JsonSerializer<>(weatherJsonConverter);
-    JsonDeserializer<CountAndSum> countAndSumDeserializer = new JsonDeserializer<>(
-        CountAndSum.class,
-        weatherJsonConverter);
-
-    JsonSerializer<TemperatureRecordAgrigator> temperatureRecordsJsonSerializer = new JsonSerializer<>(
-        weatherJsonConverter);
-    JsonDeserializer<TemperatureRecordAgrigator> temperatureRecordsJsonDeserializer = new JsonDeserializer<>(
-        TemperatureRecordAgrigator.class, weatherJsonConverter);
-
-    JsonSerializer<TemperatureRecord> temperatureRecordJsonSerializer = new JsonSerializer<>(
-        weatherJsonConverter);
-    JsonDeserializer<TemperatureRecord> temperatureRecordJsonDeserializer = new JsonDeserializer<>(
-        TemperatureRecord.class, weatherJsonConverter);
-
-    hotelSerde = Serdes.serdeFrom(hotelJsonSerializer, hotelJsonDeserializer);
-
-    weatherSerde = Serdes.serdeFrom(weatherJsonSerializer, weatherJsonDeserializer);
-
-    weatherGroupingKeySerde = Serdes.serdeFrom(weatherGroupingKeyJsonSerializer,
-        weatherGroupingKeyJsonDeserializer);
-
-    countAndSumSerde = Serdes.serdeFrom(countAndSumSerializer, countAndSumDeserializer);
-
-    temperatureRecordsSerde = Serdes.serdeFrom(temperatureRecordsJsonSerializer,
-        temperatureRecordsJsonDeserializer);
-
-    temperatureRecordSerde = Serdes
-        .serdeFrom(temperatureRecordJsonSerializer, temperatureRecordJsonDeserializer);
-  }
-
-  private static Properties provideProperties() {
-    Properties config = new Properties();
-    config.put(StreamsConfig.APPLICATION_ID_CONFIG,
-        "weather-app-v1");
-    config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,
-        Optional.ofNullable(System.getenv("BOOTSTRAP_SERVERS_CONFIG")).orElse("localhost:9092"));
-    config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-    config.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
-    config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
-    return config;
   }
 }
 

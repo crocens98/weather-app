@@ -4,6 +4,9 @@ import java.util.Map;
 import kafka.streams.scaling.util.JsonConverter;
 import org.apache.kafka.common.serialization.Serializer;
 
+/**
+ * @param <T> Entity which will be serialized to json
+ */
 public class JsonSerializer<T> implements Serializer<T> {
 
   private final JsonConverter jsonConverter;
